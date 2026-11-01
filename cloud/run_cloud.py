@@ -49,7 +49,18 @@ except ImportError:
     subprocess.run([sys.executable, "-m", "pip", "install", "-q", "--break-system-packages", "requests"], check=False)
 
 env = dict(os.environ, SAMWON_CLOUD="1", SAMWON_HOST="cloud", PYTHONIOENCODING="utf-8")
-r = subprocess.run([sys.executable, "scripts/publish.py"], cwd=work, env=env, capture_output=True, text=True, timeout=1500)
-out = (r.stdout + r.stderr).strip()
-print(out[-6000:] if out else "(출력 없음)")
-sys.exit(r.returncode)
+approve = os.environ.get("SAMWON_APPROVE", "").strip()   # 핸드폰 승인 페이지에서 '승인'된 id (쉼표 구분)
+hold = os.environ.get("SAMWON_HOLD", "").strip()         # '보류'된 id
+if approve or hold:
+    a = subprocess.run([sys.executable, "scripts/cloud_tasks.py", "approve", approve] + ([f"보류:{hold}"] if hold else []),
+                       cwd=work, env=env, capture_output=True, text=True, timeout=300)
+    print((a.stdout + a.stderr).strip()[-2000:])
+code = 0
+if os.environ.get("SAMWON_NO_PUBLISH") != "1":
+    r = subprocess.run([sys.executable, "scripts/publish.py"], cwd=work, env=env, capture_output=True, text=True, timeout=1500)
+    out = (r.stdout + r.stderr).strip()
+    print(out[-6000:] if out else "(출력 없음)")
+    code = r.returncode
+p = subprocess.run([sys.executable, "scripts/cloud_tasks.py", "pending"], cwd=work, env=env, capture_output=True, text=True, timeout=120)
+print([l for l in p.stdout.splitlines() if l.startswith("PENDING_JSON:")][-1:] and [l for l in p.stdout.splitlines() if l.startswith("PENDING_JSON:")][-1] or "PENDING_JSON:[]")
+sys.exit(code)

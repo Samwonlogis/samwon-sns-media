@@ -212,6 +212,9 @@ def restyle_xlsx(path, outdir):
     for k, v in vals.items():
         if isinstance(v, str) and v in ("주관 부서", "문서번호", "제정·개정"):
             nxt = cov.cell(row=cov[k].row, column=cov[k].column + 1).value
+            below = cov.cell(row=cov[k].row + 1, column=cov[k].column).value
+            if (not nxt or str(nxt) in ("주관 부서", "문서번호", "작성일", "제정·개정")) and below:
+                nxt = below                                  # v3·v4 표지: 항목명 아래 줄에 값
             info[v] = re.sub(r"\s*\(.*\)$", "", str(nxt or ""))
         if isinstance(v, str) and v.startswith("•"):
             how.append(v.lstrip("• ").strip())

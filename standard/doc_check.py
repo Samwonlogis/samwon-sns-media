@@ -98,9 +98,14 @@ def check_office(path: Path, res):
             fail.append(f"첫 시트가 '표지'가 아님({sheets[:1]})")
     elif ext == ".pptx":
         xml = _xml_text(z, [n for n in names if n.startswith("ppt/slides/slide")])
-        s1 = _xml_text(z, ["ppt/slides/slide1.xml"])
+        # 첫 장 = presentation.xml의 첫 sldId가 가리키는 슬라이드(파일 이름 순서와 다를 수 있음)
+        pres = _xml_text(z, ["ppt/presentation.xml"]); prel = _xml_text(z, ["ppt/_rels/presentation.xml.rels"])
+        first_rid = (re.findall(r'<p:sldId [^>]*r:id="([^"]+)"', pres) or [""])[0]
+        m = re.search(rf'Id="{first_rid}"[^>]*Target="([^"]+)"', prel) or re.search(rf'Target="([^"]+)"[^>]*Id="{first_rid}"', prel)
+        first = "ppt/" + m.group(1).lstrip("/").replace("ppt/", "") if m else "ppt/slides/slide1.xml"
+        s1 = _xml_text(z, [first])
         cover_text = _strip(s1)
-        rels = _xml_text(z, ["ppt/slides/_rels/slide1.xml.rels"])
+        rels = _xml_text(z, [first.replace("slides/", "slides/_rels/") + ".rels"])
         has_logo = "image" in rels
     else:
         return

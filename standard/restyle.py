@@ -298,20 +298,12 @@ def restyle_pptx(path, outdir):
             tb = sh.table
             if any("기안" in tb.cell(0, j).text for j in range(len(tb.columns))):
                 names = [tb.cell(1, j).text.strip() for j in range(1, 4)]
-    tmp = _c.pptx_new(title, sub, team=team, doc_no=doc_no, wide=prs.slide_width > prs.slide_height * 1.5,
-                      drafter=names[0], leader=names[1], approver=names[2] or "대표이사", kind="발표 자료")
-    new = prs.slides.add_slide(prs.slide_layouts[6])
-    for sh in list(new.shapes):
-        sh._element.getparent().remove(sh._element)
-    for sh in tmp.slides[0].shapes:
-        el = copy.deepcopy(sh._element)
-        new.shapes._spTree.append(el)
-        if sh.shape_type == 13:   # 그림: 관계 복사
-            rid = sh._element.blipFill.blip.rEmbed if hasattr(sh._element, "blipFill") else None
-            if rid:
-                part = sh.part.related_part(rid)
-                nrid = new.part.relate_to(part, "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image")
-                el.blipFill.blip.rEmbed = nrid
+    layout = next((l for l in prs.slide_layouts if len(l.placeholders) == 0), prs.slide_layouts[-1])
+    new = prs.slides.add_slide(layout)
+    for ph in list(new.placeholders):
+        ph._element.getparent().remove(ph._element)
+    _c.draw_cover_slide(prs, new, title, sub, team=team, doc_no=doc_no, drafter=names[0], leader=names[1],
+                        approver=names[2] or "대표이사", kind="발표 자료")
     lst = prs.slides._sldIdLst
     ids = list(lst)
     lst.remove(ids[-1]); lst.insert(0, ids[-1])

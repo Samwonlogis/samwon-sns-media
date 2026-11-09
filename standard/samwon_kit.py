@@ -745,8 +745,7 @@ def _ptxt(tf, text, size, bold=False, color=INK, align=None, space_after=None):
     p = tf.paragraphs[0] if not tf.paragraphs[0].text and len(tf.paragraphs) == 1 else tf.add_paragraph()
     r = p.add_run(); r.text = text; r.font.size = PPt(size); r.font.bold = bold; r.font.name = FONT
     r.font.color.rgb = PRGB.from_string(color)
-    if align == "center": p.alignment = PP_ALIGN.CENTER
-    if align == "right": p.alignment = PP_ALIGN.RIGHT
+    p.alignment = {"center": PP_ALIGN.CENTER, "right": PP_ALIGN.RIGHT}.get(align, PP_ALIGN.LEFT)
     if space_after is not None: p.space_after = PPt(space_after)
     return p
 

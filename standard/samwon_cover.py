@@ -317,7 +317,17 @@ def pptx_new(title, subtitle="", team="", doc_no="", wide=True, drafter="", lead
     prs = Presentation()
     if wide:
         prs.slide_width, prs.slide_height = Inches(13.333), Inches(7.5)
-    s = prs.slides.add_slide(prs.slide_layouts[6]); W, H = prs.slide_width, prs.slide_height
+    s = prs.slides.add_slide(prs.slide_layouts[6])
+    draw_cover_slide(prs, s, title, subtitle, team, doc_no, drafter, leader, approver, date, kind, version)
+    prs._samwon_title = title
+    return prs
+
+
+def draw_cover_slide(prs, s, title, subtitle="", team="", doc_no="", drafter="", leader="", approver="대표이사",
+                     date=None, kind="", version="제정 v1.0"):
+    """주어진 빈 슬라이드에 표준 표지를 그린다(기존 발표 파일의 표지 교체에도 사용)."""
+    W, H = prs.slide_width, prs.slide_height
+    wide = W > H * 1.5
     bg = _k._asset("cover_bg_slide.png")
     if wide and os.path.exists(bg):
         s.shapes.add_picture(bg, 0, 0, width=W, height=H)
@@ -326,7 +336,7 @@ def pptx_new(title, subtitle="", team="", doc_no="", wide=True, drafter="", lead
         _k._rect(s, 0, H - Inches(0.63), W, Inches(0.06), BLUE)
         _k._rect(s, 0, 0, W, Inches(0.05), BLUE)
     s.shapes.add_picture(LOGO, Inches(0.7), Inches(0.55), height=Inches(0.55))
-    lb = s.shapes.add_textbox(Inches(0.7), Inches(1.95), Inches(8), Inches(0.4)).text_frame
+    lb = s.shapes.add_textbox(Inches(0.7), Inches(1.95), Inches(8), Inches(0.4)).text_frame; lb.word_wrap = True
     _k._ptxt(lb, kind or "업무 자료", 14, True, BLUE)
     _k._rect(s, Inches(0.72), Inches(2.45), Inches(0.75), Inches(0.07), BLUE)
     tb = s.shapes.add_textbox(Inches(0.7), Inches(2.65), Inches(9.2), Inches(2.0)).text_frame; tb.word_wrap = True
@@ -353,5 +363,4 @@ def pptx_new(title, subtitle="", team="", doc_no="", wide=True, drafter="", lead
         _cell_txt(tbl.cell(0, j), k, 10, True, NAVY, SKY)
         _cell_txt(tbl.cell(1, j), names[j - 1], 8, False, GRAY, anchor=MSO_ANCHOR.BOTTOM)
         _cell_txt(tbl.cell(2, j), "    .    .", 8, False, GRAY)
-    prs._samwon_title = title
-    return prs
+    return s

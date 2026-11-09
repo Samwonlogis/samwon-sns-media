@@ -32,17 +32,17 @@ MIME = {".pdf": "application/pdf", ".hwp": "application/x-hwp", ".hwpx": "applic
 LIMIT = 20 * 1024 * 1024
 
 
-def body_html(headline, summary, links_html, from_name):
+def body_html(headline, summary, links_html, from_name, org="삼원종합물류(주)"):
     lines = "<br>".join(html.escape(x) for x in (summary or "").splitlines() if x.strip())
     return (
         "<div style=\"font-family:'Malgun Gothic',sans-serif;font-size:14px;color:#0E1530;line-height:1.65;max-width:680px\">"
         "<div style='border-bottom:3px solid #00489C;padding-bottom:6px;margin-bottom:12px;color:#282B6E;font-weight:700'>"
-        "SAMWON | 삼원종합물류(주)</div>"
-        "안녕하십니까, 삼원종합물류(주)입니다.<br>첨부한 PDF를 확인해 주십시오.<br><br>"
+        + ("SAMWON | 삼원종합물류(주)" if org == "삼원종합물류(주)" else html.escape(org)) + "</div>"
+        f"안녕하십니까, {html.escape(org)}입니다.<br>첨부한 파일을 확인해 주십시오.<br><br>"
         + (f"<b style='color:#282B6E'>핵심</b><br>{html.escape(headline)}<br><br>" if headline else "")
         + (f"{lines}<br><br>" if lines else "")
         + (f"<b style='color:#282B6E'>바로가기</b>{links_html}<br>" if links_html else "")
-        + f"<span style='color:#6E7891;font-size:12px'>{html.escape(from_name)} · 사내 배포용</span></div>")
+        + f"<span style='color:#6E7891;font-size:12px'>{html.escape(from_name)}</span></div>")
 
 
 def main():
@@ -53,6 +53,7 @@ def main():
     ap.add_argument("--summary", default="")
     ap.add_argument("--links-html", default="")
     ap.add_argument("--from-name", default="삼원종합물류")
+    ap.add_argument("--org", default="삼원종합물류(주)", help="머리글·인사말 기관명(개인 임대업 등은 '아트리트21 관리')")
     ap.add_argument("--attach", action="append", default=[])
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
@@ -73,7 +74,7 @@ def main():
         files = [f for f in files if f.lower().endswith(".pdf")]
     payload = {"key": key, "to": to, "subject": a.subject,
                "text": (a.headline + "\n" + a.summary).strip() or "첨부 파일을 확인해 주십시오.",
-               "html": body_html(a.headline, a.summary, a.links_html, a.from_name), "fromName": a.from_name,
+               "html": body_html(a.headline, a.summary, a.links_html, a.from_name, a.org), "fromName": a.from_name,
                "files": [{"name": os.path.basename(f), "mimeType": MIME.get(os.path.splitext(f)[1].lower(), "application/octet-stream"),
                           "base64": base64.b64encode(open(f, "rb").read()).decode()} for f in files]}
     if a.dry_run:

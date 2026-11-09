@@ -33,7 +33,7 @@ ROOT = HERE.parent
 
 # ---- 묶음 구성 (PC·클라우드 공통) ----
 CODE = ["publish.py", "common.py", "notion_sync.py", "hashtags.py", "refresh_tokens.py", "cloud_seal.py",
-        "cloud_tasks.py", "cloud_studio.py", "render.py", "sns_queue.py"]
+        "cloud_tasks.py", "cloud_studio.py", "render.py", "sns_queue.py", "sns_check.py"]
 DOCS = ["SKILL.md", "config.json", "templates/README.md", "data/facts.md", "data/history.json"]
 STUDIO_GLOBS = ["assets/*.svg", "assets/logo*.png", "assets/SAMWON_symbol*.png", "assets/RIGHTS.md",
                 "assets/fonts/*.woff2", "assets/photos/library.json", "assets/photos/LICENSE.txt",
@@ -301,7 +301,13 @@ if __name__ == "__main__":
     if a[0] == "fetch":
         fetch(*a[1:3])
     elif a[0] == "push":
-        push(a[1:])
+        folders = [x for x in a[1:] if x != "--force"]
+        if "--force" not in a:   # 과제4: 자동 검사 FAIL이면 노션 등록 차단
+            import subprocess
+            r = subprocess.run([sys.executable, str(HERE / "sns_check.py"), *folders], cwd=str(ROOT))
+            if r.returncode != 0:
+                sys.exit("등록 중단: sns_check FAIL 항목을 고친 뒤 다시 push 하십시오(대표 승인 시에만 --force)")
+        push(folders)
     elif a[0] == "import":
         print(f"노션 클라우드 제작물 가져오기: {import_inbox()}건")
     elif a[0] == "studio":

@@ -308,6 +308,10 @@ def restyle_pptx(path, outdir):
     title = max(texts, default=(0, Path(path).stem))[1]
     sub = next((t for s, t in texts if 16 <= s < 30 and t != title and "삼원종합물류" not in t), "")
     team = next((t.split("·")[0].strip() for s, t in texts if "팀" in t and "·" in t), "")
+    flat = [t for _, t in texts]
+    for i, t in enumerate(flat[:-1]):                       # v3·v4 표지: '주관 부서' 다음 문단이 값
+        if t == "주관 부서" and flat[i + 1].endswith("팀"):
+            team = flat[i + 1]
     doc_no = next((m.group(0) for s, t in texts if (m := re.search(r"SW-[A-Z]{2}-\d{4}-\d{2}", t))), "")
     names = ["", "", "대표이사"]
     for sh in s0.shapes:

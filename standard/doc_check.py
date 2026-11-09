@@ -24,7 +24,8 @@ NAME_REPORT = re.compile(r"^\d{8}_.+")
 BRAND = ["00489C", "08448C", "282B6E", "141850", "EAF0FA", "F5F8FD", "D5DEEE", "0E1530", "6E7891", "D63A40", "FF6B70"]
 BANNED = [(r"제때", "'제때'"), (r"하느냐에\s*따라", "'~하느냐에 따라'"),
           (r"업계\s*(최고|1위)|국내\s*1위", "근거 없는 최상급"), (r"알아보겠습니다|결론적으로 말하면", "AI 티 나는 표현"),
-          (r"(수익|수입)\s*(을|를)?\s*보장|고수익", "수익 보장")]
+          (r"(수익|수입)\s*(을|를)?\s*보장|고수익", "수익 보장"),
+          (r"최종\s*확인을\s*받으십시오|전문가\s*검토\s*기준으로\s*작성", "검토 안내 문구(대표 지시 2026-11-09 삭제)")]
 FLEET = re.compile(r"(차량|화물차|보유|운영|넘버|영업용\s*번호)[^\n.]{0,10}?(\d[\d,]{1,})\s*대(?!\s*이상)")
 OLD_COLORS = {"064285": "이전 로고색 #064285", "2F8CEB": "이전 포인트색 #2F8CEB", "0A2A5C": "이전 네이비 #0A2A5C"}
 
@@ -180,6 +181,8 @@ def check_layout(path: Path, res):
     if found is None:
         return
     for pno, f, why in found:
+        if why.startswith("표지"):
+            res["fail"].append(f"{why} — 표지는 반드시 1쪽"); continue
         res["warn"].append(f"쪽 낭비 {pno}쪽(사용률 {f * 100:.0f}%): {why}")
 
 

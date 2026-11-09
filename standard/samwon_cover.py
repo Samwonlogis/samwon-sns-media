@@ -4,7 +4,8 @@
   ① 영문 로고(SAMWON)  ② 작업물 내용(구분·제목·부제)  ③ 작성일  ④ 결재방(기안 · 팀장 · 최종결재자)
 
 디자인(모던 클린): 흰 바탕 + 상단 가는 블루 선 + 하단 진한 네이비 띠(회사 정보) · 좌측 정렬 대제목 ·
-짧은 블루 강조 막대 · 4칸 문서 정보 줄 · 우하단 결재방. 표지는 독립 구역(section)이라 본문 쪽 번호는 1부터 센다.
+짧은 블루 강조 막대 · 4칸 문서 정보 줄 · 오른쪽 위 결재방(v4, 2026-11-09).
+표지는 어떤 경우에도 1쪽(Word는 고정 높이 표, Excel은 1쪽 맞춤 인쇄, PowerPoint는 1장). 표지는 독립 구역(section)이라 본문 쪽 번호는 1부터 센다.
 
 사용법 (samwon_kit 대신 이 모듈을 import — 본문 함수는 kit 것을 그대로 쓴다)
     from samwon_cover import *
@@ -109,62 +110,83 @@ def _lines(text, size_pt, width_cm, factor=1.03):
     return max(1, math.ceil(disp_len(text) / per))
 
 
+def _title_fit(title, subtitle, W, box_h):
+    """제목·부제가 제목 칸(box_h, cm) 안에 들어가는 가장 큰 글자 크기를 고른다."""
+    for tsize in (30, 26, 22, 19, 16):
+        tl = _lines(title, tsize, W); lh = tsize * 0.0353 * 1.38
+        sl = _lines(subtitle, 13, W) if subtitle else 0
+        need = 0.62 + 0.22 + 0.13 + 0.42 + lh * tl + (0.32 + 0.68 * sl if subtitle else 0)
+        if need <= box_h - 0.4:
+            return tsize, lh
+    return 16, 16 * 0.0353 * 1.38
+
+
 def _cover_docx(doc, title, subtitle, kind, team, doc_no, version, date, names, landscape):
+    """표지 v4(대표 지시 2026-11-09): 결재방 오른쪽 위 · 표지 전체를 '고정 높이 표' 하나에 담아
+    글이 길어도 절대 다음 쪽으로 넘어가지 않게 한다(행 높이 exact → 넘치는 글은 칸 안에서 잘리지 쪽을 밀지 않음)."""
     sec = doc.sections[0]
     pw, ph = (29.7, 21.0) if landscape else (21.0, 29.7)
-    sec.top_margin = Cm(1.9); sec.bottom_margin = Cm(2.75 if not landscape else 2.55)
+    sec.top_margin = Cm(1.6); sec.bottom_margin = Cm(2.75 if not landscape else 2.55)
     sec.left_margin = sec.right_margin = Cm(2.0)
     W = pw - 4.0; H = ph - sec.top_margin.cm - sec.bottom_margin.cm
     bg = _k._asset("cover_bg_landscape.png" if landscape else "cover_bg_portrait.png")
-    used = 0.0
-    # ① 로고 + 배경
-    p = doc.paragraphs[0] if doc.paragraphs else doc.add_paragraph(); _exact(p, 1.35); used += 1.35
-    p.add_run().add_picture(LOGO, height=Cm(1.05))
+    # 배경 그림을 붙일 첫 문단(높이 거의 0)
+    p0 = doc.paragraphs[0] if doc.paragraphs else doc.add_paragraph(); _exact(p0, 0.05)
     if os.path.exists(bg):
-        _anchor_bg(p.add_run(), bg, pw, ph)
-    top_gap = 4.9 if not landscape else 2.3
-    _gap(doc, top_gap); used += top_gap
-    # ② 구분 라벨 · 강조 막대 · 제목 · 부제
-    p = doc.add_paragraph(); _exact(p, 0.62); used += 0.62
+        _anchor_bg(p0.add_run(), bg, pw, ph)
+    # 행 높이(cm): 머리(로고·결재방) / 여백 / 제목 칸 / 여백 / 문서 정보 줄  — 합계는 쪽 높이보다 3cm 이상 작게
+    if landscape:
+        rows_h = [2.9, 1.6, 6.4, 0.0, 1.6]
+    else:
+        rows_h = [2.9, 4.6, 8.4, 0.0, 1.6]
+    rows_h[3] = max(0.5, H - 3.0 - sum(rows_h))
+    T = doc.add_table(rows=5, cols=2); _no_borders(T); _cell_margins(T, 0, 0)
+    T.alignment = WD_TABLE_ALIGNMENT.LEFT; _fixed_widths(T, [W - 8.5, 8.5])
+    for i, h in enumerate(rows_h):
+        _row_props(T.rows[i], True, False, h, "exact")
+    for i in range(1, 5):
+        T.cell(i, 0).merge(T.cell(i, 1))
+    # ① 머리: 로고(왼쪽) · 결재방(오른쪽 위)
+    lc, rc = T.cell(0, 0), T.cell(0, 1)
+    lc.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
+    pl = lc.paragraphs[0]; _exact(pl, 1.35, before=0.15)
+    pl.add_run().add_picture(LOGO, height=Cm(1.05))
+    rc.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
+    _exact(rc.paragraphs[0], 0.05)
+    _approval_docx(rc, names)
+    _exact(rc.add_paragraph(), 0.05)
+    _exact(T.cell(1, 0).paragraphs[0], 0.05)
+    # ② 제목 칸: 구분 라벨 · 강조 막대 · 제목 · 부제
+    tc = T.cell(2, 0); tc.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
+    tsize, lh = _title_fit(title, subtitle, W, rows_h[2])
+    p = tc.paragraphs[0]; _exact(p, 0.62)
     r = _font(p.add_run(kind or "업무 문서"), 11, True, BLUE)
     sp = OxmlElement("w:spacing"); sp.set(qn("w:val"), "30"); r._element.get_or_add_rPr().append(sp)
-    _gap(doc, 0.22); used += 0.22
-    bar = doc.add_table(rows=1, cols=1); _no_borders(bar); _cell_margins(bar, 0, 0); _fixed_widths(bar, [1.6])
-    bar.alignment = WD_TABLE_ALIGNMENT.LEFT; _shade(bar.rows[0].cells[0], BLUE)
-    _row_props(bar.rows[0], True, False, 0.13, "exact"); _exact(bar.rows[0].cells[0].paragraphs[0], 0.1)
-    used += 0.13
-    _gap(doc, 0.42); used += 0.42
-    tsize = 30 if disp_len(title) <= 34 else 26
-    tl = min(3, _lines(title, tsize, W)); lh = tsize * 0.0353 * 1.38
-    p = doc.add_paragraph(); _exact(p, lh); used += lh * tl
+    p = tc.add_paragraph(); _exact(p, 0.13, before=0.22)
+    pPr = p._p.get_or_add_pPr()
+    bdr = parse_xml(f'<w:pBdr {nsdecls("w")}><w:bottom w:val="single" w:sz="18" w:space="0" w:color="{BLUE}"/></w:pBdr>')
+    pPr.append(bdr)
+    ind = OxmlElement("w:ind"); ind.set(qn("w:right"), str(int((W - 1.6) * 567))); pPr.append(ind)
+    p = tc.add_paragraph(); _exact(p, lh, before=0.42)
     _font(p.add_run(title), tsize, True, NAVY)
     if subtitle:
-        _gap(doc, 0.32); used += 0.32
-        sl = min(2, _lines(subtitle, 13, W)); p = doc.add_paragraph(); _exact(p, 0.68); used += 0.68 * sl
+        p = tc.add_paragraph(); _exact(p, 0.68, before=0.32)
         _font(p.add_run(subtitle), 13, False, GRAY)
-    # ③ 문서 정보 줄(아래쪽)  ④ 결재방
-    bottom = 1.4 + 0.75 + 2.65 + 0.12
-    flex = max(0.6, H - used - bottom - 1.1)   # Word·LibreOffice 줄 높이 차이 여유(표지가 2쪽으로 넘치지 않게)
-    _gap(doc, flex)
+    _exact(T.cell(3, 0).paragraphs[0], 0.05)
+    # ③ 문서 정보 줄
+    mc = T.cell(4, 0); mc.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
+    _exact(mc.paragraphs[0], 0.05)
     meta = _meta(team, doc_no, date, version)
-    mt = doc.add_table(rows=2, cols=4); mt.alignment = WD_TABLE_ALIGNMENT.LEFT
+    mt = mc.add_table(rows=2, cols=4); mt.alignment = WD_TABLE_ALIGNMENT.LEFT
     _no_borders(mt); _cell_margins(mt, 0.0, 0.0); _fixed_widths(mt, [W / 4] * 4)
     for j, (k, v) in enumerate(meta):
         c0, c1 = mt.cell(0, j), mt.cell(1, j)
         _cell_border(c0, top=("single", 12, NAVY))
         c0.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.BOTTOM
-        p0 = c0.paragraphs[0]; _exact(p0, 0.42); _font(p0.add_run(k), 8, False, GRAY)
+        p0_ = c0.paragraphs[0]; _exact(p0_, 0.42); _font(p0_.add_run(k), 8, False, GRAY)
         p1 = c1.paragraphs[0]; _exact(p1, 0.55); _font(p1.add_run(v), 10.5, True, INK)
     _row_props(mt.rows[0], True, False, 0.7, "exact"); _row_props(mt.rows[1], True, False, 0.7, "exact")
-    _gap(doc, 0.75)
-    bt = doc.add_table(rows=1, cols=2); _no_borders(bt); _cell_margins(bt, 0, 0)
-    _fixed_widths(bt, [W - 8.5, 8.5]); bt.alignment = WD_TABLE_ALIGNMENT.LEFT
-    _row_props(bt.rows[0], True, False, 2.65, "exact")
-    l, rcell = bt.rows[0].cells
-    l.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.BOTTOM
-    pl = l.paragraphs[0]; _exact(pl, 0.05)          # 검토 문구는 표지에 넣지 않는다(대표 지시 2026-11-09)
-    rp = rcell.paragraphs[0]; _exact(rp, 0.05)
-    _approval_docx(rcell, names)
+    _exact(mc.add_paragraph(), 0.05)
     # 표지 구역 끝 → 본문 구역(쪽 번호 1부터)
     doc.add_section(WD_SECTION.NEW_PAGE)
     for p in reversed(doc.paragraphs):
@@ -210,10 +232,27 @@ def xlsx_new(title, subtitle="", team="", doc_no="", version="제정 v1.0", how_
     H = ws.row_dimensions
     _fill_row = lambda r, color, c1=1, c2=10: [_fill(ws.cell(row=r, column=c), color) for c in range(c1, c2 + 1)]
     H[1].height = 5; _fill_row(1, BLUE)                       # 상단 가는 블루 선
-    H[2].height = 16
-    H[3].height = 40
+    H[2].height = 14
+    # 머리: 로고(왼쪽) · 결재방(오른쪽 위, v4 2026-11-09)
     img = XLImage(LOGO); img.height = 44; img.width = int(44 * _ratio()); ws.add_image(img, "B3")
-    for r in range(4, 9): H[r].height = 24                    # 여백
+    a0 = 3
+    ws.merge_cells(start_row=a0, start_column=6, end_row=a0 + 2, end_column=6)
+    c = ws.cell(row=a0, column=6, value="결\n재"); c.font = XF(9, True, "FFFFFF"); _fill(c, NAVY)
+    c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    names = _names(drafter, leader, approver)
+    for j, k in enumerate(APPROVAL):
+        col = 7 + j
+        h = ws.cell(row=a0, column=col, value=k); h.font = XF(9, True, NAVY); _fill(h, SKY)
+        h.alignment = Alignment(horizontal="center", vertical="center")
+        s_ = ws.cell(row=a0 + 1, column=col, value=names[j]); s_.font = XF(7.5, False, GRAY)
+        s_.alignment = Alignment(horizontal="center", vertical="bottom")
+        d = ws.cell(row=a0 + 2, column=col, value="    .    ."); d.font = XF(7.5, False, GRAY)
+        d.alignment = Alignment(horizontal="center", vertical="center")
+    for rr in range(a0, a0 + 3):
+        for col in range(6, 10):
+            ws.cell(row=rr, column=col).border = Border(left=_LN, right=_LN, top=_LN, bottom=_LN)
+    H[a0].height = 18; H[a0 + 1].height = 44; H[a0 + 2].height = 16
+    for r in range(6, 9): H[r].height = 24                    # 여백
     r = 9; H[r].height = 20
     c = ws.cell(row=r, column=2, value=kind or "업무 대장·서식"); c.font = XF(11, True, BLUE)
     H[10].height = 6
@@ -253,27 +292,7 @@ def xlsx_new(title, subtitle="", team="", doc_no="", version="제정 v1.0", how_
             c.alignment = Alignment(wrap_text=True, vertical="top", indent=0)
             H[r].height = 16 * max(1, math.ceil(disp_len(line) / 52)) + 4; r += 1
         H[r].height = 12; r += 1
-    # 결재방(우측) + 검토 문구(좌측)
-    a0 = r
-    ws.merge_cells(start_row=a0, start_column=6, end_row=a0 + 2, end_column=6)
-    c = ws.cell(row=a0, column=6, value="결\n재"); c.font = XF(9, True, "FFFFFF"); _fill(c, NAVY)
-    c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    names = _names(drafter, leader, approver)
-    for j, k in enumerate(APPROVAL):
-        col = 7 + j
-        h = ws.cell(row=a0, column=col, value=k); h.font = XF(9, True, NAVY); _fill(h, SKY)
-        h.alignment = Alignment(horizontal="center", vertical="center")
-        s = ws.cell(row=a0 + 1, column=col, value=names[j]); s.font = XF(7.5, False, GRAY)
-        s.alignment = Alignment(horizontal="center", vertical="bottom")
-        d = ws.cell(row=a0 + 2, column=col, value="    .    ."); d.font = XF(7.5, False, GRAY)
-        d.alignment = Alignment(horizontal="center", vertical="center")
-    for rr in range(a0, a0 + 3):
-        for col in range(6, 10):
-            ws.cell(row=rr, column=col).border = Border(left=_LN, right=_LN, top=_LN, bottom=_LN)
-    H[a0].height = 18; H[a0 + 1].height = 44; H[a0 + 2].height = 16
-    ws.merge_cells(start_row=a0, start_column=2, end_row=a0 + 2, end_column=5)
-
-    r = a0 + 3; H[r].height = 14; r += 1
+    H[r].height = 10; r += 1
     # 하단 네이비 띠
     H[r].height = 4; _fill_row(r, BLUE); r += 1
     ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=9)
@@ -349,9 +368,9 @@ def draw_cover_slide(prs, s, title, subtitle="", team="", doc_no="", drafter="",
         ln.line.color.rgb = PRGB.from_string(NAVY); ln.line.width = PPt(1.5)
         bx = s.shapes.add_textbox(x, y0 + Inches(0.05), cw - Inches(0.15), Inches(0.7)).text_frame; bx.word_wrap = True
         _k._ptxt(bx, k, 9, False, GRAY); _k._ptxt(bx, v, 12, True, INK)
-    # 결재방(우하단)
+    # 결재방(오른쪽 위, v4 2026-11-09)
     names = _names(drafter, leader, approver)
-    tw = Inches(4.0); tbl = s.shapes.add_table(3, 4, W - tw - Inches(0.7), Inches(5.0), tw, Inches(1.3)).table
+    tw = Inches(4.0); tbl = s.shapes.add_table(3, 4, W - tw - Inches(0.6), Inches(0.42), tw, Inches(1.3)).table
     tbl.columns[0].width = Inches(0.4)
     for j in range(1, 4): tbl.columns[j].width = Inches(1.2)
     tbl.rows[0].height = Inches(0.3); tbl.rows[1].height = Inches(0.75); tbl.rows[2].height = Inches(0.25)

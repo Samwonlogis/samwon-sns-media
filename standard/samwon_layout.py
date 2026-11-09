@@ -88,6 +88,10 @@ def waste_findings(path, has_cover=True, kind=None):
     out = []
     n = len(fills)
     start = 1 if has_cover else 0
+    if has_cover and len(texts) >= 2:
+        p1, p2 = re.sub(r"\s+", "", texts[0]), re.sub(r"\s+", "", texts[1])
+        if (("주관부서" in p2 and "주관부서" not in p1) or ("최종결재자" in p2 and "최종결재자" not in p1)):
+            out.append((2, fills[1][1], "표지가 2쪽으로 넘침"))
     for idx in range(start, n):
         pno, f, nchar = fills[idx]
         last = idx == n - 1

@@ -74,47 +74,54 @@ def docx_to_md(path):
         if el.tag == qn("w:p") and (el.findall(".//" + qn("w:br")) and any(b.get(qn("w:type")) == "page" for b in el.iter(qn("w:br")))
                                     or el.find(qn("w:pPr")) is not None and el.find(qn("w:pPr")).find(qn("w:sectPr")) is not None):
             cut = i; break
+    # 표지 안의 모든 문단(표 안에 든 v4 표지 포함)과 표를 차례로 읽는다
+    cover_ps, cover_tbls = [], []
     for el in els[:cut]:
         if el.tag == qn("w:p"):
-            p = docx.text.paragraph.Paragraph(el, d)
-            runs = [r for r in p.runs if r.text.strip()]
-            if not runs:
-                continue
-            sz, col, txt = _size(runs[0]), _color(runs[0]), p.text.strip()
-            m = RE_DATE.search(txt)
-            if sz >= 24 and "title" not in meta:
-                meta["title"] = txt
-            elif "작성일" in txt and m:
-                meta["date"] = f"{m.group(1)}. {int(m.group(2)):02d}. {int(m.group(3)):02d}."
-            elif 12.5 <= sz < 24 and "title" in meta and "subtitle" not in meta:
-                meta["subtitle"] = txt
-            elif sz and 10.5 < sz <= 12.5 and col.upper() in ("00489C", "08448C") and "title" not in meta:
-                meta["kind"] = txt
+            cover_ps.append(el)
         elif el.tag == qn("w:tbl"):
-            t = docx.table.Table(el, d)
+            cover_tbls += list(el.iter(qn("w:tbl")))
+            cover_ps += [p for p in el.iter(qn("w:p"))]
+    for el in cover_ps:
+        p = docx.text.paragraph.Paragraph(el, d)
+        runs = [r for r in p.runs if r.text.strip()]
+        if not runs:
+            continue
+        sz, col, txt = _size(runs[0]), _color(runs[0]).upper(), p.text.strip()
+        m = RE_DATE.search(txt)
+        if "title" not in meta and (sz >= 24 or (sz >= 15 and col == "282B6E" and runs[0].font.bold)):
+            meta["title"] = txt
+        elif "작성일" in txt and m:
+            meta["date"] = f"{m.group(1)}. {int(m.group(2)):02d}. {int(m.group(3)):02d}."
+        elif 12.5 <= sz < 15 and "title" in meta and "subtitle" not in meta:
+            meta["subtitle"] = txt
+        elif sz and 10.5 < sz <= 12.5 and col in ("00489C", "08448C") and "title" not in meta:
+            meta["kind"] = txt
+    for el in cover_tbls:
+        t = docx.table.Table(el, d)
+        try:
             rows_txt = [[c.replace("**", "") for c in _cells_text(r)] for r in t.rows]
-            if len(rows_txt) == 2 and "주관 부서" in rows_txt[0]:          # v3 표지: 1행 항목명 · 2행 값
-                for k, v in zip(rows_txt[0], rows_txt[1]):
-                    if k == "주관 부서": meta["team"] = v
-                    elif k == "문서번호": meta["doc_no"] = v
-                    elif k == "작성일": meta["date"] = v
-                    elif k.startswith("제정"): meta["version"] = v
-            for row in (t.rows if not (len(rows_txt) == 2 and "주관 부서" in rows_txt[0]) else []):
-                cells = _cells_text(row)
-                if len(cells) >= 2:
-                    k, v = cells[0].replace("**", ""), cells[1].replace("**", "")
-                    if k == "주관 부서": meta["team"] = v
-                    elif k == "문서번호": meta["doc_no"] = v
-                    elif k.startswith("제정"): meta["version"] = re.sub(r"\s*\(.*\)$", "", v)
-            # 결재방 이름(서명 칸의 작은 회색 글씨)
-            for inner in el.iter(qn("w:tbl")):
-                if inner is el:
-                    continue
-                it = docx.table.Table(inner, d)
-                if len(it.rows) == 3 and any("기안" in c.text for c in it.rows[0].cells):
-                    names = [c.text.strip() for c in it.rows[1].cells][-3:]
-                    if len(names) == 3:
-                        meta["drafter"], meta["leader"], meta["approver"] = names[0], names[1], names[2] or "대표이사"
+        except Exception:
+            continue
+        if len(rows_txt) == 2 and "주관 부서" in rows_txt[0]:          # v3·v4 표지: 1행 항목명 · 2행 값
+            for k, v in zip(rows_txt[0], rows_txt[1]):
+                if k == "주관 부서": meta["team"] = v
+                elif k == "문서번호": meta["doc_no"] = v
+                elif k == "작성일": meta["date"] = v
+                elif k.startswith("제정"): meta["version"] = v
+            continue
+        if len(t.rows) == 3 and any("기안" in c.text for c in t.rows[0].cells):   # 결재방
+            names = [c.text.strip() for c in t.rows[1].cells][-3:]
+            if len(names) == 3:
+                meta["drafter"], meta["leader"], meta["approver"] = names[0], names[1], names[2] or "대표이사"
+            continue
+        for row in t.rows:                                              # 구판 표지 정보 표
+            cells = _cells_text(row)
+            if len(cells) >= 2:
+                k, v = cells[0].replace("**", ""), cells[1].replace("**", "")
+                if k == "주관 부서": meta["team"] = v
+                elif k == "문서번호": meta["doc_no"] = v
+                elif k.startswith("제정"): meta["version"] = re.sub(r"\s*\(.*\)$", "", v)
     meta.setdefault("title", Path(path).stem.split("_", 1)[-1])
     # 본문
     lines = []

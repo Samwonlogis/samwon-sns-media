@@ -35,7 +35,7 @@ ROOT = HERE.parent
 CODE = ["publish.py", "common.py", "notion_sync.py", "hashtags.py", "refresh_tokens.py", "cloud_seal.py",
         "cloud_tasks.py", "cloud_studio.py", "render.py", "sns_queue.py", "sns_check.py"]
 DOCS = ["SKILL.md", "config.json", "templates/README.md", "data/facts.md", "data/history.json"]
-STUDIO_GLOBS = ["assets/*.svg", "assets/logo*.png", "assets/SAMWON_symbol*.png", "assets/RIGHTS.md",
+STUDIO_GLOBS = ["assets/*.svg", "assets/logo*.png", "assets/kakao_channel_qr.png", "assets/SAMWON_symbol*.png", "assets/RIGHTS.md",
                 "assets/fonts/*.woff2", "assets/photos/library.json", "assets/photos/LICENSE.txt",
                 "assets/photos/lib/*.jpg", "assets/characters/**/*"]
 

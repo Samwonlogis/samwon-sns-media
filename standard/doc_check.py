@@ -4,6 +4,9 @@
 사용: python3 doc_check.py <파일 또는 폴더> [...] [--json] [--report]
       --report : 정기 보고서 PDF(YYYYMMDD_보고서명.pdf) 규칙으로 파일명 검사
 검사: 파일명 · 표지 4요소(영문 로고·제목·작성일·결재방) · 브랜드 3색 외 유채색 · 금지 표현 · 차량 대수 · (PDF) 쪽수·링크
+      · 쪽 낭비(LibreOffice가 있으면 쪽마다 사용률을 재서 중간에 반 이상 빈 쪽·거의 빈 마지막 쪽·빈 기입 행만 있는 쪽을 찾는다)
+      · 서식 기준(본문 글꼴 맑은 고딕 외 글꼴, 표 행 쪽 나눔 방지 누락)
+      --no-layout : 쪽 사용률 검사 생략
 판정: FAIL / WARN / PASS. FAIL이 있으면 종료 코드 1.
 """
 import colorsys
@@ -12,6 +15,8 @@ import re
 import sys
 import zipfile
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 TEAMS = "인사|홍보|총무|영업|운영|재경|비서|기획|경영"
 NAME_DOC = re.compile(rf"^\d{{4}}({TEAMS})_.+")
@@ -79,7 +84,8 @@ def check_office(path: Path, res):
     if ext == ".docx":
         body = _xml_text(z, ["word/document.xml"])
         xml = body + _xml_text(z, [n for n in names if n.startswith("word/header") or n.startswith("word/footer")])
-        first = body.split("w:br w:type=\"page\"")[0] if "w:type=\"page\"" in body else body[:60000]
+        cut = [i for i in (body.find("<w:sectPr"), body.find('w:type="page"')) if i > 0]
+        first = body[:min(cut)] if cut else body[:60000]
         has_logo = "<w:drawing" in first or "<pic:pic" in first
         cover_text = _strip(first)
     elif ext == ".xlsx":
@@ -108,6 +114,14 @@ def check_office(path: Path, res):
         warn.append("표지에 작성일 표기가 보이지 않음")
     text = _strip(xml)
     res["_text"] = text
+    if ext == ".docx":
+        fonts = set(re.findall(r'w:eastAsia="([^"]+)"', body)) | set(re.findall(r'w:ascii="([^"]+)"', body))
+        other = sorted(f for f in fonts if f not in ("맑은 고딕", "Malgun Gothic"))
+        if other:
+            warn.append("표준 외 글꼴: " + ", ".join(other[:4]))
+        rows = body.count("<w:tr>") + body.count("<w:tr ")
+        if rows >= 6 and body.count("<w:cantSplit") < rows * 0.5:
+            warn.append("표 행 쪽 나눔 방지(cantSplit) 미적용 — 표 행이 쪽 사이에서 잘릴 수 있음")
     # 색 검사
     cols = set(c.upper() for c in re.findall(r'(?:w:color w:val|w:fill|srgbClr val|rgb)="(?:FF)?([0-9A-Fa-f]{6})"', xml))
     for c, why in OLD_COLORS.items():
@@ -150,7 +164,21 @@ def check_pdf(path: Path, res):
             fail.append(f"{why} 사용")
 
 
-def check(path: Path, report=False):
+def check_layout(path: Path, res):
+    try:
+        import samwon_layout
+    except ImportError:
+        return
+    if samwon_layout.SOFFICE is None or path.suffix.lower() not in (".docx", ".xlsx"):
+        return
+    found = samwon_layout.waste_findings(str(path), has_cover=True)
+    if found is None:
+        return
+    for pno, f, why in found:
+        res["warn"].append(f"쪽 낭비 {pno}쪽(사용률 {f * 100:.0f}%): {why}")
+
+
+def check(path: Path, report=False, layout=True):
     res = {"file": path.name, "fail": [], "warn": []}
     stem = path.stem
     if report or path.suffix.lower() == ".pdf":
@@ -163,6 +191,8 @@ def check(path: Path, report=False):
             check_office(path, res)
         elif path.suffix.lower() == ".pdf":
             check_pdf(path, res)
+        if layout:
+            check_layout(path, res)
     except zipfile.BadZipFile:
         res["fail"].append("파일이 손상됨(열 수 없음)")
     text = res.pop("_text", "")
@@ -188,7 +218,8 @@ def main(argv):
                       and not f.name.startswith("~$")]
         elif p.exists():
             files.append(p)
-    results = [check(f, report) for f in files]
+    layout = "--no-layout" not in argv
+    results = [check(f, report, layout) for f in files]
     if as_json:
         print(json.dumps({"checked": len(results), "fail": sum(r["result"] == "FAIL" for r in results),
                           "warn": sum(r["result"] == "WARN" for r in results), "results": results}, ensure_ascii=False, indent=1))

@@ -9,7 +9,8 @@
 
 본문(Word)
   # 대제목 / ## 소제목 / ### 굵은 소항목
-  - 글머리표,  [ ] 체크 항목,  > 안내 상자,  ===  쪽 나눔
+  - 글머리표,  [ ] 체크 항목,  > 안내 상자,  1. / ① / 가. 번호 문단(내어쓰기)
+  ===  쪽 나눔(앞 쪽이 절반도 차지 않으면 자동으로 무시) · === 강제  항상 쪽 나눔
   | 머리 | 머리 |  (첫 행 머리글)   표 바로 앞 줄에 <form> 이면 '항목|기입란' 서식표, <fill N> 이면 빈 기입 행 N줄 추가
   **굵게** 지원.  빈 줄은 문단 구분.
 
@@ -30,6 +31,10 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from samwon_cover import *  # noqa: F401,F403
 from samwon_cover import BLUE, NAVY, SKY, GRAY, _shade, _font  # noqa
+try:
+    import samwon_layout
+except ImportError:          # 쪽 사용률 도구가 없으면 자동 보정만 생략
+    samwon_layout = None
 
 from openpyxl.styles import Alignment, PatternFill
 from openpyxl.utils import get_column_letter
@@ -67,12 +72,14 @@ def _tables(lines, i):
     return rows, i
 
 
-def build_docx(meta, body, outdir):
+def _emit_docx(meta, body, outdir, level=0, soft=frozenset(), markers=False):
+    compact(level)
+    land = meta.get("landscape") == "yes"
     doc = docx_new(meta["title"], meta.get("subtitle", ""), team=meta.get("team", ""), doc_no=meta.get("doc_no", ""),
                    kind=meta.get("kind", ""), drafter=meta.get("drafter", ""), leader=meta.get("leader", ""),
-                   approver=meta.get("approver", "대표이사"), landscape=meta.get("landscape") == "yes",
-                   date=meta.get("date"))
-    i, mode, buf = 0, None, []
+                   approver=meta.get("approver", "대표이사"), landscape=land, date=meta.get("date"),
+                   version=meta.get("version", "제정 v1.0"))
+    i, mode, buf, nbreak = 0, None, [], 0
 
     def flush():
         if buf:
@@ -81,8 +88,13 @@ def build_docx(meta, body, outdir):
         ln = body[i]; s = ln.strip()
         if not s:
             flush(); i += 1; continue
-        if s == "===":
-            flush(); page_break(doc); i += 1; continue
+        if s == "===" or s == "=== 강제":
+            flush(); nbreak += 1
+            if s == "=== 강제" or nbreak not in soft:
+                p = page_break(doc)
+                if markers:
+                    _font(p.add_run(f"§BK{nbreak}§"), 2, False, "FFFFFF")
+            i += 1; continue
         if s in ("<form>",) or s.startswith("<fill"):
             flush(); mode = s; i += 1; continue
         if s.startswith("|"):
@@ -96,47 +108,85 @@ def build_docx(meta, body, outdir):
             else:
                 n = int(mode.split()[1].rstrip(">")) if mode and mode.startswith("<fill") else 0
                 rows = [[c.replace("**", "") if ri == 0 else c for c in r] for ri, r in enumerate(rows)]
-                ncol = max(len(r) for r in rows); usable = 25.7 if meta.get("landscape") == "yes" else 17.0
-                ln = [max(3, min(30, max((len(r[j]) if j < len(r) else 0) for r in rows))) for j in range(ncol)]
-                ln = [max(l ** 0.8, 2.5) for l in ln]; widths = [round(usable * l / sum(ln), 2) for l in ln]
-                table(doc, rows, widths=widths, fill_rows=n)
+                table(doc, rows, fill_rows=n)
             mode = None; continue
         if s.startswith("### "):
-            flush(); para(doc, s[4:].replace("**", ""), size=11, bold=True, color=NAVY)
+            flush(); h3(doc, s[4:])
         elif s.startswith("## "):
-            flush(); h2(doc, s[3:].replace("**", ""))
+            flush(); h2(doc, s[3:])
         elif s.startswith("# "):
-            flush(); h1(doc, s[2:].replace("**", ""))
+            flush(); h1(doc, s[2:])
         elif s.startswith("[ ] "):
             flush(); checklist(doc, [s[4:]])
-        elif s.startswith("- "):
+        elif s.startswith("- ") or s.startswith("• "):
             flush(); bullets(doc, [s[2:]])
-        elif re.match(r"^\d+\. ", s):
-            flush(); para(doc, s, indent=0.4)
+        elif re.match(r"^(\(?\d{1,2}[.)]|[①-⑳]|[가-하]\.)\s", s):
+            flush(); numbered(doc, s)
         elif s.startswith("> "):
             flush(); box = []
             while i < len(body) and body[i].strip().startswith("> "):
                 box.append(body[i].strip()[2:]); i += 1
-            t = doc.add_table(rows=1, cols=1); c = t.rows[0].cells[0]; _shade(c, SKY)
-            for n, line in enumerate(box):
-                pp = c.paragraphs[0] if n == 0 else c.add_paragraph()
-                pp.paragraph_format.space_after = Pt(2)
-                for k, seg in enumerate(line.split("**")):
-                    if seg: _font(pp.add_run(seg), 10, k % 2 == 1, NAVY)
-            doc.add_paragraph(); continue
+            note_box(doc, box); continue
         else:
             buf.append(s)
         i += 1
     flush()
     out = os.path.join(outdir, meta["file"] + ".docx")
-    docx_save(doc, out); return out
+    docx_save(doc, out)
+    compact(0)
+    return out, nbreak
+
+
+def build_docx(meta, body, outdir, auto=True):
+    """원고 → Word. auto=True이면 LibreOffice로 쪽 사용률을 재어
+    ① '===' 쪽 나눔 앞 쪽이 절반도 차지 않으면 그 나눔을 없애고 ② 마지막 쪽이 15% 미만이면 간격을 단계적으로 줄인다."""
+    out, nb = _emit_docx(meta, body, outdir)
+    if not auto or samwon_layout is None or samwon_layout.SOFFICE is None:
+        return out
+    soft = set()
+    for _ in range(4):                       # 나눔 하나를 없애면 뒤 쪽 배치가 바뀌므로 안정될 때까지 반복
+        if not nb or len(soft) >= nb:
+            break
+        _emit_docx(meta, body, outdir, markers=True, soft=frozenset(soft))
+        r = samwon_layout.page_fills(out, keep_pdf=True)
+        if not r:
+            break
+        fills, pdf, texts = r
+        added = False
+        for k in range(1, nb + 1):
+            if k in soft:
+                continue
+            pg = next((idx for idx, t in enumerate(texts) if f"§BK{k}§" in t.replace(" ", "").replace("\n", "")), None)
+            # 표식은 쪽 나눔 뒤(다음 쪽 맨 위)에 찍히므로 나눔 앞 쪽은 pg-1
+            if pg is not None and pg - 1 >= 1 and fills[pg - 1][1] < 0.5:
+                soft.add(k); added = True
+                break                         # 앞에서부터 하나씩
+        if not added:
+            break
+    best = None
+    for level in (0, 1, 2):
+        out, _ = _emit_docx(meta, body, outdir, level, frozenset(soft))
+        fills = samwon_layout.page_fills(out)
+        if not fills:
+            break
+        pages, lastf = len(fills), fills[-1][1]
+        if best is None or pages < best[1]:
+            best = (level, pages, lastf)
+        if lastf >= 0.15 or pages <= 2:
+            break
+    if best and best[0] != level:
+        out, _ = _emit_docx(meta, body, outdir, best[0], frozenset(soft))
+    if best:
+        print(f"LAYOUT {os.path.basename(out)}: {best[1]}쪽(표지 포함) · 간격 단계 {best[0]} · 없앤 쪽 나눔 {len(soft)}개")
+    return out
 
 
 def build_xlsx(meta, xl, outdir):
     how = [h.strip() for h in meta.get("how_to", "").split("||") if h.strip()]
     wb = xlsx_new(meta.get("xlsx_title", meta["title"]), meta.get("xlsx_subtitle", meta.get("subtitle", "")),
                   team=meta.get("team", ""), doc_no=meta.get("xlsx_doc_no", meta.get("doc_no", "")), how_to=how,
-                  drafter=meta.get("drafter", ""), leader=meta.get("leader", ""), date=meta.get("date"))
+                  drafter=meta.get("drafter", ""), leader=meta.get("leader", ""), date=meta.get("date"),
+                  kind=meta.get("xlsx_kind", "관리 대장·서식"), version=meta.get("version", "제정 v1.0"))
     i = 0
     while i < len(xl):
         s = xl[i].strip()
@@ -152,10 +202,10 @@ def build_xlsx(meta, xl, outdir):
         headers, data = [h.replace("**", "") for h in rows[0]], rows[1:]
         data = [[(float(v) if re.fullmatch(r"-?\d+(\.\d+)?", v) and not v.startswith("0") or v == "0" else (v or None))
                  for v in r] for r in data]
-        widths = [float(w) for w in opts["widths"].split(",")] if "widths" in opts else [max(10, min(40, len(h) * 2.2 + 4)) for h in headers]
-        blank = int(opts.get("blank", 30))
+        widths = [float(w) for w in opts["widths"].split(",")] if "widths" in opts else None
+        blank = int(opts["blank"]) if "blank" in opts else None
         ws = sheet(wb, name, headers, widths=widths, rows=data, title=title, note=note, blank_rows=blank)
-        hr = ws._samwon_header_row; last = hr + len(data) + blank
+        hr = ws._samwon_header_row; last = ws._samwon_last_row
         for j, h in enumerate(headers, 1):
             if re.search(r"율", h):
                 for r in range(hr + 1, last + 1): ws.cell(row=r, column=j).number_format = "0.0%"
@@ -178,10 +228,12 @@ def build_xlsx(meta, xl, outdir):
 
 
 def main():
-    src = sys.argv[1]; outdir = sys.argv[2] if len(sys.argv) > 2 else "."
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    src = args[0]; outdir = args[1] if len(args) > 1 else "."
     meta, body, xl = parse(src)
     outs = []
-    if meta.get("file") and any(l.strip() for l in body): outs.append(build_docx(meta, body, outdir))
+    auto = "--no-auto" not in sys.argv
+    if meta.get("file") and any(l.strip() for l in body): outs.append(build_docx(meta, body, outdir, auto))
     if meta.get("xlsx"): outs.append(build_xlsx(meta, xl, outdir))
     for o in outs: print("OUT", o)
 

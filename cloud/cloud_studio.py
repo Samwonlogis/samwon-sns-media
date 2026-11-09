@@ -4,17 +4,19 @@
     SAMWON_CLOUD_KEY=<키> python3 cloud_studio.py fetch [저장소] [브랜치]
         → 암호화 묶음(bundle.bin: .env·설정·스크립트·문서·대기열)과 자산 묶음(studio.bin: 사진·폰트·로고)을
           ./samwon-sns 로 푼다. 이후 그 폴더에서 SKILL.md 절차대로 게시물을 만든다.
+        (fetch는 노션에 '대기' 중인 클라우드 제작물도 작업 폴더 queue/로 함께 가져와 날짜·주제 중복을 막는다)
     cd samwon-sns && python3 scripts/cloud_studio.py push queue/<폴더> [queue/<폴더> ...]
-        → 이미지 공개 URL 업로드 → 노션 등록 → 게시 이력 기록 → 암호화 수신함(cloud/inbox/)에 보관
-          → 게시 묶음(bundle.bin) 재생성. 클라우드 게시 작업이 바로 이 게시물을 승인 요청·게시한다.
+        → 노션 등록(미리보기 포함) → 암호화 패키지(post.json·슬라이드·이력)를 노션 페이지에 첨부
+          → 노션 '클라우드 제작' = '대기'. ※ 클라우드는 GitHub 쓰기가 막혀 있어 이미지 공개 업로드는 PC가 한다.
 
 PC(cloud_sync.py가 매시 자동 호출)에서:
     python scripts/cloud_studio.py import
-        → 수신함의 게시물을 queue/ 로 가져오고(이미 있으면 건너뜀) 게시 이력을 합친 뒤 수신함을 비운다.
+        → 노션의 '대기' 패키지를 queue/ 로 가져오고(이미 있으면 건너뜀) 이력을 합친 뒤 '가져옴'으로 표시한다.
+          이어서 cloud_sync가 이미지 공개 업로드·게시 묶음 갱신을 하므로, 다음 클라우드 게시 회차에 승인 요청이 나간다.
     python scripts/cloud_studio.py studio [--force]
         → 자산 묶음(studio.bin)을 자산이 바뀌었을 때만 다시 올린다.
 
-보안: 모든 문안·토큰은 cloud_seal로 암호화해 올린다. 공개 저장소에는 게시용 이미지(sns/<id>/)만 평문으로 둔다.
+보안: 문안·토큰은 cloud_seal로 암호화한다. 노션 첨부 패키지도 암호화되어 있고, 공개 저장소에는 게시용 이미지(sns/<id>/)만 평문으로 둔다.
 """
 import base64
 import hashlib
@@ -140,90 +142,137 @@ def fetch(repo="Samwonlogis/samwon-sns-media", branch="main"):
     for name in ("studio.bin", "bundle.bin"):
         zipfile.ZipFile(io.BytesIO(open_sealed(key, get(name)))).extractall(work)
     meta = json.loads(get("bundle_meta.json"))
+    try:
+        os.chdir(work)
+        sys.path.insert(0, str(work / "scripts"))
+        import cloud_studio as cs  # 묶음 안의 최신 버전
+        k = cs.pull_pending(work, mark=False)
+        if k:
+            print(f"노션 대기 중인 클라우드 제작물 {k}건을 작업 폴더에 반영(중복 제작 방지)")
+    except Exception as e:  # noqa: BLE001
+        print(f"노션 대기분 확인 실패(제작 전 노션 'SNS 콘텐츠 목록'을 직접 확인할 것): {e}")
     print(f"스튜디오 준비 완료: {work} · 묶음 생성 {meta.get('made_at')} · 게시 대기 {meta.get('posts')}건")
 
 
+# ---------------- 노션 수신함 (클라우드 → PC) ----------------
+INBOX_PROP = "클라우드 제작"
+
+
+def _notion():
+    sys.path.insert(0, str(HERE))
+    import notion_sync as n
+    return n
+
+
+def _ensure_prop(env):
+    import requests
+    n = _notion()
+    requests.patch(f"{n.API}/databases/{env['NOTION_DATABASE_ID']}", headers=n.H(env), timeout=60,
+                   json={"properties": {INBOX_PROP: {"rich_text": {}}}})
+
+
+def _upload_zip(env, name: str, data: bytes) -> str:
+    import requests
+    n = _notion()
+    r = requests.post(f"{n.API}/file_uploads", headers=n.H(env), timeout=60,
+                      json={"filename": name, "content_type": "application/zip"})
+    r.raise_for_status()
+    fid = r.json()["id"]
+    r = requests.post(f"{n.API}/file_uploads/{fid}/send", headers=n.H(env, json_ct=False), timeout=300,
+                      files={"file": (name, data, "application/zip")})
+    r.raise_for_status()
+    return fid
+
+
+def _set_inbox(env, page_id: str, value: str):
+    import requests
+    n = _notion()
+    requests.patch(f"{n.API}/pages/{page_id}", headers=n.H(env), timeout=60,
+                   json={"properties": {INBOX_PROP: {"rich_text": n._rt(value)}}}).raise_for_status()
+
+
 def push(folders):
-    """클라우드에서 만든 게시물을 공개 이미지 업로드 → 노션 등록 → 이력 기록 → 수신함 보관 → 게시 묶음 재생성."""
-    os.environ.pop("SAMWON_CLOUD", None)                  # 이미지 업로드를 허용(게시 모드 아님)
+    """클라우드에서 만든 게시물을 노션에 등록하고 암호화 패키지를 첨부한다(이미지 공개 업로드·묶음 갱신은 PC가 한다)."""
+    import requests
+    os.environ.pop("SAMWON_CLOUD", None)
     env = _env()
     sys.path.insert(0, str(HERE))
     from cloud_seal import seal
-    from common import iter_posts, load_post, now, save_post
-    import notion_sync
-    import publish
-    get, put, _, _ = _gh(env)
-    key = env["SAMWON_CLOUD_KEY"]
-    index = (get("cloud/inbox/index.json") or {})
-    idx = json.loads(base64.b64decode(index["content"])) if index.get("content") else []
+    from common import load_post, now, save_post
+    n = _notion()
+    _ensure_prop(env)
     for f in folders:
         folder = Path(f) if Path(f).is_absolute() else ROOT / f
         post = load_post(folder)
-        publish.host_images.no_verify = True
-        publish.host_images(folder, post, env)
-        post.setdefault("made_by", "cloud")
+        post["made_by"] = "cloud"
         save_post(folder, post)
-        notion_sync.add(env, folder)
-        os.system(f'{sys.executable} "{HERE / "sns_queue.py"}" log "{folder}"')
+        os.system(f'"{sys.executable}" "{HERE / "sns_queue.py"}" log "{folder}"')
+        n.add(env, folder)
+        page = n.find_page(env, post["id"])
+        if not page:
+            raise RuntimeError(f"노션 등록 확인 실패: {post['id']}")
         pkg = {f"queue/{folder.name}/{p.name}": p.read_bytes() for p in folder.iterdir() if p.is_file()}
         pkg["data/history.json"] = (ROOT / "data" / "history.json").read_bytes()
-        put(f"cloud/inbox/{folder.name}.bin", seal(key, _zip(pkg)), f"inbox: {folder.name}")
-        if folder.name not in idx:
-            idx.append(folder.name)
-        print(f"클라우드 제작 등록: {post['id']} → 노션·수신함")
-    put("cloud/inbox/index.json", json.dumps(idx, ensure_ascii=False).encode(), "inbox: index")
-    # 게시 묶음 재생성(새 게시물 포함) — 클라우드 게시 작업이 바로 승인 요청을 보낼 수 있게
-    from datetime import timedelta, datetime
-    cutoff = now() - timedelta(days=10)
-    picked = [(fd, p) for fd, p in iter_posts()
-              if p.get("status") not in ("published", "cancelled", "rejected")
-              and (not p.get("scheduled_at") or datetime.fromisoformat(p["scheduled_at"]) >= cutoff)]
-    put("cloud/bundle.bin", seal(key, _zip(bundle_files(ROOT, picked))), f"cloud: bundle (studio) {now():%m%d %H%M}")
-    put("cloud/bundle_meta.json", json.dumps({"made_at": now().isoformat(), "posts": len(picked), "by": "cloud-studio"}).encode(), "cloud: meta")
-    print(f"게시 묶음 재생성: 게시 대기 {len(picked)}건")
+        fid = _upload_zip(env, f"{folder.name}.zip", seal(env["SAMWON_CLOUD_KEY"], _zip(pkg)))
+        requests.patch(f"{n.API}/blocks/{page['id']}/children", headers=n.H(env), timeout=60, json={"children": [
+            n.h2("클라우드 제작 패키지(암호화 · PC 자동 가져오기용, 삭제 금지)"),
+            {"type": "file", "file": {"type": "file_upload", "file_upload": {"id": fid}}}]}).raise_for_status()
+        _set_inbox(env, page["id"], f"대기 {now():%Y-%m-%d %H:%M}")
+        print(f"클라우드 제작 등록: {post['id']} → 노션(검토 대기) · PC 가져오기 대기")
 
 
-# ---------------- PC 쪽 ----------------
-
-def import_inbox():
+def pull_pending(dest: Path, mark: bool) -> int:
+    """노션에서 '대기' 중인 클라우드 제작 패키지를 dest/queue 로 풀고 이력을 합친다. mark=True면 '가져옴' 표시(PC 전용)."""
+    import requests
     env = _env()
-    if not env.get("GITHUB_TOKEN"):
+    if not env.get("NOTION_TOKEN") or not env.get("SAMWON_CLOUD_KEY"):
         return 0
     sys.path.insert(0, str(HERE))
     from cloud_seal import open_sealed
-    from common import log
-    get, put, delete, raw = _gh(env)
-    index = get("cloud/inbox/index.json")
-    idx = json.loads(base64.b64decode(index["content"])) if index and index.get("content") else []
-    if not idx:
-        return 0
-    done = []
-    hist_f = ROOT / "data" / "history.json"
-    for name in idx:
-        try:
-            z = zipfile.ZipFile(io.BytesIO(open_sealed(env["SAMWON_CLOUD_KEY"], raw(f"cloud/inbox/{name}.bin"))))
-        except Exception as e:  # noqa: BLE001
-            log(f"수신함 가져오기 실패(다음 회차 재시도): {name} — {e}")
+    from common import log, now
+    n = _notion()
+    _ensure_prop(env)
+    r = requests.post(f"{n.API}/databases/{env['NOTION_DATABASE_ID']}/query", headers=n.H(env), timeout=60,
+                      json={"filter": {"property": INBOX_PROP, "rich_text": {"starts_with": "대기"}}})
+    r.raise_for_status()
+    count = 0
+    hist_f = dest / "data" / "history.json"
+    for page in r.json().get("results", []):
+        blocks = requests.get(f"{n.API}/blocks/{page['id']}/children?page_size=100", headers=n.H(env), timeout=60).json()
+        url = next((b["file"]["file"]["url"] for b in blocks.get("results", [])
+                    if b.get("type") == "file" and b["file"].get("type") == "file" and ".zip" in b["file"]["file"]["url"]), None)
+        if not url:
+            log(f"클라우드 패키지 첨부를 찾지 못함: {page['id']}")
             continue
-        dest = ROOT / "queue" / name
-        if dest.exists() and (dest / "post.json").exists():
-            log(f"수신함: 이미 대기열에 있음 → 건너뜀 {name}")
-        else:
-            dest.mkdir(parents=True, exist_ok=True)
+        try:
+            z = zipfile.ZipFile(io.BytesIO(open_sealed(env["SAMWON_CLOUD_KEY"], requests.get(url, timeout=300).content)))
+        except Exception as e:  # noqa: BLE001
+            log(f"클라우드 패키지 열기 실패(다음 회차 재시도): {page['id']} — {e}")
+            continue
+        names = {Path(a).parts[1] for a in z.namelist() if a.startswith("queue/")}
+        for name in names:
+            out = dest / "queue" / name
+            if (out / "post.json").exists():
+                log(f"클라우드 패키지: 이미 대기열에 있음 → 건너뜀 {name}")
+                continue
+            out.mkdir(parents=True, exist_ok=True)
             for arc in z.namelist():
                 if arc.startswith(f"queue/{name}/"):
-                    (dest / Path(arc).name).write_bytes(z.read(arc))
-            log(f"수신함: 클라우드 제작 게시물 가져옴 {name}")
+                    (out / Path(arc).name).write_bytes(z.read(arc))
+            log(f"클라우드 제작 게시물 가져옴: {name}")
         if "data/history.json" in z.namelist():
             mine = json.loads(hist_f.read_text(encoding="utf-8")) if hist_f.exists() else []
-            theirs = json.loads(z.read("data/history.json"))
-            merged = {h["id"]: h for h in mine + theirs}
+            merged = {h["id"]: h for h in mine + json.loads(z.read("data/history.json"))}
             hist_f.write_text(json.dumps(sorted(merged.values(), key=lambda h: h["date"])[-60:], ensure_ascii=False, indent=2), encoding="utf-8")
-        delete(f"cloud/inbox/{name}.bin", f"inbox: imported {name}")
-        done.append(name)
-    rest = [n for n in idx if n not in done]
-    put("cloud/inbox/index.json", json.dumps(rest, ensure_ascii=False).encode(), "inbox: index")
-    return len(done)
+        if mark:
+            _set_inbox(env, page["id"], f"가져옴 {now():%Y-%m-%d %H:%M}")
+        count += 1
+    return count
+
+
+def import_inbox():
+    """PC: 노션의 클라우드 제작 패키지를 queue/로 가져온다(cloud_sync가 매시 호출)."""
+    return pull_pending(ROOT, mark=True)
 
 
 def upload_studio(force=False):
@@ -239,7 +288,7 @@ def upload_studio(force=False):
         return False
     _, put, _, _ = _gh(env)
     put("cloud/studio.bin", seal(env["SAMWON_CLOUD_KEY"], _zip(files)), "cloud: studio assets")
-    put("cloud/cloud_studio.py", (HERE / "cloud_studio.py").read_bytes(), "cloud: cloud_studio.py")
+    put("cloud/cloud_studio.py", (HERE / "cloud_studio.py").read_bytes(), "cloud: cloud_studio.py")  # 클라우드 부트스트랩용
     put("cloud/cloud_seal.py", (HERE / "cloud_seal.py").read_bytes(), "cloud: cloud_seal.py")
     state["studio"] = digest
     state_f.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -254,7 +303,7 @@ if __name__ == "__main__":
     elif a[0] == "push":
         push(a[1:])
     elif a[0] == "import":
-        print(f"수신함 가져오기: {import_inbox()}건")
+        print(f"노션 클라우드 제작물 가져오기: {import_inbox()}건")
     elif a[0] == "studio":
         print("업로드함" if upload_studio("--force" in a) else "변경 없음")
     else:

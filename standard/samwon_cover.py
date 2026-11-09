@@ -144,7 +144,7 @@ def _cover_docx(doc, title, subtitle, kind, team, doc_no, version, date, names, 
         _font(p.add_run(subtitle), 13, False, GRAY)
     # ③ 문서 정보 줄(아래쪽)  ④ 결재방
     bottom = 1.4 + 0.75 + 2.65 + 0.12
-    flex = max(0.6, H - used - bottom - 0.45)
+    flex = max(0.6, H - used - bottom - 1.1)   # Word·LibreOffice 줄 높이 차이 여유(표지가 2쪽으로 넘치지 않게)
     _gap(doc, flex)
     meta = _meta(team, doc_no, date, version)
     mt = doc.add_table(rows=2, cols=4); mt.alignment = WD_TABLE_ALIGNMENT.LEFT
@@ -162,9 +162,7 @@ def _cover_docx(doc, title, subtitle, kind, team, doc_no, version, date, names, 
     _row_props(bt.rows[0], True, False, 2.65, "exact")
     l, rcell = bt.rows[0].cells
     l.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.BOTTOM
-    pl = l.paragraphs[0]; pl.paragraph_format.space_after = Pt(0); pl.paragraph_format.line_spacing = 1.25
-    pl.paragraph_format.right_indent = Cm(0.8)
-    _font(pl.add_run(_k.REVIEW_NOTE), 7.5, False, GRAY)
+    pl = l.paragraphs[0]; _exact(pl, 0.05)          # 검토 문구는 표지에 넣지 않는다(대표 지시 2026-11-09)
     rp = rcell.paragraphs[0]; _exact(rp, 0.05)
     _approval_docx(rcell, names)
     # 표지 구역 끝 → 본문 구역(쪽 번호 1부터)
@@ -274,8 +272,7 @@ def xlsx_new(title, subtitle="", team="", doc_no="", version="제정 v1.0", how_
             ws.cell(row=rr, column=col).border = Border(left=_LN, right=_LN, top=_LN, bottom=_LN)
     H[a0].height = 18; H[a0 + 1].height = 44; H[a0 + 2].height = 16
     ws.merge_cells(start_row=a0, start_column=2, end_row=a0 + 2, end_column=5)
-    c = ws.cell(row=a0, column=2, value=_k.REVIEW_NOTE); c.font = XF(7.5, False, GRAY)
-    c.alignment = Alignment(wrap_text=True, vertical="bottom")
+
     r = a0 + 3; H[r].height = 14; r += 1
     # 하단 네이비 띠
     H[r].height = 4; _fill_row(r, BLUE); r += 1

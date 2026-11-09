@@ -14,6 +14,14 @@
   | 머리 | 머리 |  (첫 행 머리글)   표 바로 앞 줄에 <form> 이면 '항목|기입란' 서식표, <fill N> 이면 빈 기입 행 N줄 추가
   **굵게** 지원.  빈 줄은 문단 구분.
 
+발표 자료(같은 원고 안) — 교육·안내·보고용
+  @pptx: 2611총무_비품관리_교육자료          @pptx_title: 비품 관리 이렇게 합니다
+  @@발표
+  %% 슬라이드: 슬라이드 제목
+  - 핵심 문장(최대 6줄, 한 장에 메시지 하나)
+  | 머리 | 머리 |  (표 슬라이드)
+  > 아래쪽 작은 메모
+
 엑셀(같은 원고 안 또는 별도 원고)
   @xlsx: 2611총무_만기통합관리대장      (본문 끝의 '@@엑셀' 줄 아래 '%% 시트' 블록이 엑셀로 간다)
   @xlsx_title: 만기 통합 관리 대장      @how_to: 사용 방법 1 || 사용 방법 2
@@ -51,8 +59,8 @@ def _is_sep(line):
     return bool(re.match(r"^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$", line.strip()))
 
 
-def parse(path):
-    meta, body, xl = {}, [], []
+def parse(path, with_ppt=False):
+    meta, body, xl, pp = {}, [], [], []
     cur = body
     for raw in open(path, encoding="utf-8").read().splitlines():
         m = re.match(r"^@(\w+):\s*(.*)$", raw)
@@ -60,8 +68,10 @@ def parse(path):
             meta[m.group(1)] = m.group(2).strip(); continue
         if raw.strip() == "@@엑셀":
             cur = xl; continue
+        if raw.strip() == "@@발표":
+            cur = pp; continue
         cur.append(raw)
-    return meta, body, xl
+    return (meta, body, xl, pp) if with_ppt else (meta, body, xl)
 
 
 def _tables(lines, i):
@@ -227,14 +237,47 @@ def build_xlsx(meta, xl, outdir):
     xlsx_save(wb, out); return out
 
 
+def build_pptx(meta, pp, outdir):
+    """'@@발표' 아래 '%% 슬라이드: 제목' 블록 → 표준 발표 파일(표지 + 본문 슬라이드).
+    블록 안: '- 문장'(최대 6줄) · '| 표 |'(머리글 포함) · '> 메모'(슬라이드 아래 작은 글씨)"""
+    prs = pptx_new(meta.get("pptx_title", meta["title"]), meta.get("pptx_subtitle", meta.get("subtitle", "")),
+                   team=meta.get("team", ""), doc_no=meta.get("pptx_doc_no", meta.get("doc_no", "")),
+                   drafter=meta.get("drafter", ""), leader=meta.get("leader", ""), date=meta.get("date"),
+                   kind=meta.get("pptx_kind", "교육·안내 자료"), version=meta.get("version", "제정 v1.0"))
+    i = 0
+    while i < len(pp):
+        s = pp[i].strip()
+        if not s.startswith("%% 슬라이드:"):
+            i += 1; continue
+        title = s[len("%% 슬라이드:"):].strip(); i += 1
+        lines, rows, note = [], [], None
+        while i < len(pp) and not pp[i].strip().startswith("%% 슬라이드:"):
+            t = pp[i].strip()
+            if t.startswith("|"):
+                if not _is_sep(t): rows.append(_cells(t))
+            elif t.startswith("> "):
+                note = t[2:]
+            elif t:
+                lines.append(t[2:] if t.startswith("- ") else t)
+            i += 1
+        if rows:
+            slide_table(prs, title, rows, lines[:2], note)
+        else:
+            slide_title_body(prs, title, lines[:7], note)
+    out = os.path.join(outdir, meta["pptx"] + ".pptx")
+    os.makedirs(outdir, exist_ok=True); prs.save(out)
+    return out
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     src = args[0]; outdir = args[1] if len(args) > 1 else "."
-    meta, body, xl = parse(src)
+    meta, body, xl, pp = parse(src, with_ppt=True)
     outs = []
     auto = "--no-auto" not in sys.argv
     if meta.get("file") and any(l.strip() for l in body): outs.append(build_docx(meta, body, outdir, auto))
     if meta.get("xlsx"): outs.append(build_xlsx(meta, xl, outdir))
+    if meta.get("pptx") and any(l.strip() for l in pp): outs.append(build_pptx(meta, pp, outdir))
     for o in outs: print("OUT", o)
 
 

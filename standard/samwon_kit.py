@@ -784,6 +784,30 @@ def slide_title_body(prs, title, lines, note=None):
     return s
 
 
+def slide_table(prs, title, rows, lines=None, note=None):
+    """표 슬라이드: 제목 + (요약 1~2줄) + 네이비 머리글 표"""
+    s = slide_title_body(prs, title, lines or [], note)
+    W, H = prs.slide_width, prs.slide_height
+    top = Inches(1.6 + 0.45 * len(lines or []))
+    ncol = max(len(r) for r in rows); rows = [r + [""] * (ncol - len(r)) for r in rows]
+    h = min(H - top - Inches(0.9), Inches(0.42) * len(rows))
+    tbl = s.shapes.add_table(len(rows), ncol, Inches(0.85), top, W - Inches(1.7), h).table
+    widths = auto_widths(rows, (W - Inches(1.7)) / 914400 * 2.54, 12)
+    for j, w in enumerate(widths):
+        tbl.columns[j].width = int(w / 2.54 * 914400)
+    kinds = col_kinds(rows)
+    for i, r in enumerate(rows):
+        for j, v in enumerate(r):
+            c = tbl.cell(i, j); c.text = ""; p = c.text_frame.paragraphs[0]
+            run = p.add_run(); run.text = v.replace("**", ""); run.font.name = FONT
+            run.font.size = PPt(12 if i else 12); run.font.bold = i == 0
+            run.font.color.rgb = PRGB.from_string("FFFFFF" if i == 0 else INK)
+            p.alignment = PP_ALIGN.CENTER if i == 0 else {"center": PP_ALIGN.CENTER, "right": PP_ALIGN.RIGHT}.get(kinds[j], PP_ALIGN.LEFT)
+            c.fill.solid(); c.fill.fore_color.rgb = PRGB.from_string(NAVY if i == 0 else (PALE if i % 2 == 0 else "FFFFFF"))
+            c.vertical_anchor = MSO_ANCHOR.MIDDLE
+    return s
+
+
 def slide_image(prs, image_path, caption=None):
     """이미지(카드뉴스 등)를 가운데 배치한 슬라이드"""
     from PIL import Image

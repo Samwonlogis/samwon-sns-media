@@ -750,6 +750,16 @@ def _ptxt(tf, text, size, bold=False, color=INK, align=None, space_after=None):
     return p
 
 
+def _rich_ppt(tf, text, size, color=INK):
+    """**굵게**를 지원하는 한 문단"""
+    p = tf.paragraphs[0]; p.alignment = PP_ALIGN.LEFT
+    for i, seg in enumerate(str(text).split("**")):
+        if seg:
+            r = p.add_run(); r.text = seg; r.font.size = PPt(size); r.font.name = FONT
+            r.font.bold = i % 2 == 1; r.font.color.rgb = PRGB.from_string(NAVY if i % 2 == 1 else color)
+    return p
+
+
 def _rect(slide, x, y, w, h, color):
     s = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, x, y, w, h)
     s.fill.solid(); s.fill.fore_color.rgb = PRGB.from_string(color); s.line.fill.background(); s.shadow.inherit = False
@@ -775,9 +785,25 @@ def slide_title_body(prs, title, lines, note=None):
     _ptxt(tb, title, 26, True, NAVY)
     ln = s.shapes.add_connector(1, Inches(0.6), Inches(1.32), W - Inches(0.6), Inches(1.32))
     ln.line.color.rgb = PRGB.from_string(LINE); ln.line.width = PPt(1)
-    bb = s.shapes.add_textbox(Inches(0.85), Inches(1.6), W - Inches(1.7), H - Inches(2.5)).text_frame; bb.word_wrap = True
-    for l in lines:
-        _ptxt(bb, l, 18, space_after=8)
+    if lines and len(lines) <= 5 and all(disp_len(l) <= 46 for l in lines):
+        # 카드형: 번호 배지 + 옅은 바탕 카드(한 장에 메시지 3~5개)
+        n = len(lines); top = Inches(1.65); gap = Inches(0.18)
+        ch = min(Inches(0.95), int((H - Inches(2.6) - gap * (n - 1)) / n))
+        for k, l in enumerate(lines):
+            y = top + (ch + gap) * k
+            card = s.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.85), y, W - Inches(1.7), ch)
+            card.adjustments[0] = 0.12; card.fill.solid(); card.fill.fore_color.rgb = PRGB.from_string(PALE)
+            card.line.color.rgb = PRGB.from_string(LINE); card.line.width = PPt(0.75); card.shadow.inherit = False
+            badge = _rect(s, Inches(1.05), y + int((ch - Inches(0.5)) / 2), Inches(0.5), Inches(0.5), BLUE)
+            bt = badge.text_frame; bt.margin_left = bt.margin_right = 0; bt.vertical_anchor = MSO_ANCHOR.MIDDLE
+            _ptxt(bt, str(k + 1), 16, True, "FFFFFF", align="center")
+            tb2 = s.shapes.add_textbox(Inches(1.8), y, W - Inches(2.9), ch).text_frame
+            tb2.word_wrap = True; tb2.vertical_anchor = MSO_ANCHOR.MIDDLE
+            _rich_ppt(tb2, l, 20)
+    else:
+        bb = s.shapes.add_textbox(Inches(0.85), Inches(1.6), W - Inches(1.7), H - Inches(2.5)).text_frame; bb.word_wrap = True
+        for l in lines:
+            _ptxt(bb, "•  " + l if not l[:1].isdigit() else l, 18, space_after=8)
     nb = s.shapes.add_textbox(Inches(0.6), H - Inches(0.55), W - Inches(1.2), Inches(0.35)).text_frame
     _ptxt(nb, (note + "    ") if note else "", 10, False, GRAY)
     _ptxt(nb, f"{COMPANY}  ·  {len(prs.slides)}", 9, False, GRAY, align="right")

@@ -1,0 +1,45 @@
+{
+  "version": "2026-11-09",
+  "how_to": [
+    "스킬 description·SKILL.md를 고칠 때마다, 그리고 매월 첫 월요일 관제 점검 때 실행한다.",
+    "trigger: 각 문장을 받았을 때 어떤 스킬을 쓸지 판정해 expect와 비교한다(none = 해당 스킬 없음). 정답률 90% 미만이면 description을 고친다.",
+    "task: 시나리오를 실제로 만들어 보고 checks(자동 검사기)와 rubric(사람 기준)을 모두 통과해야 PASS. 결과는 evals/results/YYYYMM.json에 남긴다."
+  ],
+  "trigger": [
+    {"q": "다음 주 화요일 카드뉴스 하나 만들어줘, 결빙 안전 주제로", "expect": "samwon-sns"},
+    {"q": "11/14 게시물 수정 요청 들어온 거 반영해", "expect": "samwon-sns"},
+    {"q": "인스타 차단 떴는데 게시 다시 해야 돼?", "expect": "samwon-sns"},
+    {"q": "차고지 CCTV 설치 계획서 워드로 만들어줘", "expect": "samwon-standard"},
+    {"q": "연차 관리 대장 엑셀 만들어줘", "expect": "samwon-standard"},
+    {"q": "구매요청서 양식 하나 필요해", "expect": "samwon-standard"},
+    {"q": "정부지원사업 분석 보고서 PDF 디자인 다시 잡아줘", "expect": "samwon-standard"},
+    {"q": "평가 제도 설계해줘, KPI랑 등급 분포까지", "expect": "samwon-hr-expert"},
+    {"q": "호봉제를 직급 밴드 연봉제로 바꾸는 안 만들어줘", "expect": "samwon-hr-expert"},
+    {"q": "취업규칙 정년 조항 고령자 장려금 받게 고쳐줘", "expect": "samwon-hr-expert"},
+    {"q": "EMBA 기말 발표 PPT 만들어줘, 15분짜리", "expect": "exec-presentation"},
+    {"q": "화주 제안용 회사 발표자료 만들어줘", "expect": "exec-presentation+samwon-standard"},
+    {"q": "회사소개서 인쇄용 브로셔 디자인", "expect": "samwon-standard(브랜드 기준) — samwon-sns는 쓰지 않음"},
+    {"q": "오늘 날씨 어때", "expect": "none"},
+    {"q": "주식방 요약 다시 보내줘", "expect": "none"}
+  ],
+  "task": [
+    {"id": "sns-01", "skill": "samwon-sns", "prompt": "11월 셋째 주 정보형 안전 운행 카드뉴스 1건(블랙아이스 제외 주제)",
+     "checks": ["sns_check.py FAIL 0", "출처 5곳 이상·1차 2곳 이상", "슬라이드 6~8장"],
+     "rubric": ["첫 장만 보고도 넘겨 볼 이유", "장마다 구체 정보", "11월은 '추위' 표현", "배차실 1인칭 Threads 문안 + 질문 마무리"]},
+    {"id": "sns-02", "skill": "samwon-sns", "prompt": "지입 차주 모집 홍보 게시물",
+     "checks": ["sns_check.py FAIL 0"],
+     "rubric": ["수익 보장·계약 전 금전 관련 내용 없음", "차량 대수 미표기", "compliance.md 통과"]},
+    {"id": "std-01", "skill": "samwon-standard", "prompt": "총무팀 차고지 출입 관리 대장(엑셀)",
+     "checks": ["doc_check.py PASS", "첫 시트 '표지'·결재방", "파일명 2611총무_…"],
+     "rubric": ["바로 쓰는 대장(드롭다운·필터·인쇄 설정)", "사용 방법 안내", "법적 점검(개인정보·CCTV 고지)"]},
+    {"id": "std-02", "skill": "samwon-standard", "prompt": "정부지원 공고 3건 요약 PDF(samwon_pdf)",
+     "checks": ["doc_check.py PASS", "render WRAP-CHECK 0", "LINKS ≥ 공고 수×2"],
+     "rubric": ["공고 바로가기·신청하기 링크", "신청 자격·필요 서류", "브랜드 3색 배지"]},
+    {"id": "hr-01", "skill": "samwon-hr-expert", "prompt": "근로계약서 표준 세트(본사·직영기사·단기)",
+     "checks": ["doc_check.py PASS"],
+     "rubric": ["삼원종합물류(주) 단일", "근로기준법 필수 기재사항 전부", "'노무사 검토 필요' 표시", "바로 쓰는 서식"]},
+    {"id": "ep-01", "skill": "exec-presentation", "prompt": "2027 영업 전략 경영 보고 10장",
+     "checks": ["doc_check.py PASS(회사 업무용이면 결재방 표지)"],
+     "rubric": ["결론형 제목", "장당 메시지 1개", "수치 출처", "브랜드 3색"]}
+  ]
+}

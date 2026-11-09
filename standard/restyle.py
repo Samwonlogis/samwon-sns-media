@@ -92,7 +92,14 @@ def docx_to_md(path):
                 meta["kind"] = txt
         elif el.tag == qn("w:tbl"):
             t = docx.table.Table(el, d)
-            for row in t.rows:
+            rows_txt = [[c.replace("**", "") for c in _cells_text(r)] for r in t.rows]
+            if len(rows_txt) == 2 and "주관 부서" in rows_txt[0]:          # v3 표지: 1행 항목명 · 2행 값
+                for k, v in zip(rows_txt[0], rows_txt[1]):
+                    if k == "주관 부서": meta["team"] = v
+                    elif k == "문서번호": meta["doc_no"] = v
+                    elif k == "작성일": meta["date"] = v
+                    elif k.startswith("제정"): meta["version"] = v
+            for row in (t.rows if not (len(rows_txt) == 2 and "주관 부서" in rows_txt[0]) else []):
                 cells = _cells_text(row)
                 if len(cells) >= 2:
                     k, v = cells[0].replace("**", ""), cells[1].replace("**", "")

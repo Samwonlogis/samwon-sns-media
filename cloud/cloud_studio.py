@@ -33,7 +33,7 @@ ROOT = HERE.parent
 
 # ---- 묶음 구성 (PC·클라우드 공통) ----
 CODE = ["publish.py", "common.py", "notion_sync.py", "hashtags.py", "refresh_tokens.py", "cloud_seal.py",
-        "cloud_tasks.py", "cloud_studio.py", "render.py", "sns_queue.py", "sns_check.py"]
+        "cloud_tasks.py", "cloud_studio.py", "render.py", "sns_queue.py", "sns_check.py", "youtube_setup.py"]
 DOCS = ["SKILL.md", "config.json", "templates/README.md", "data/facts.md", "data/history.json"]
 STUDIO_GLOBS = ["assets/*.svg", "assets/logo*.png", "assets/kakao_channel_qr.png", "assets/SAMWON_symbol*.png", "assets/RIGHTS.md",
                 "assets/fonts/*.woff2", "assets/photos/library.json", "assets/photos/LICENSE.txt",
